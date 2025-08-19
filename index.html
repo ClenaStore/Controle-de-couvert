@@ -141,7 +141,98 @@
     const filtroEmpresa = document.getElementById('filtroEmpresa');
     let servidores = [], dadosRegistros = [];
 
-    // === resto do JS igual ao que você já tinha, só alterando carregarRegistros ===
+    function proximaSegunda(dataRef = new Date()) {
+      const dia = dataRef.getDay();
+      const diasParaSegunda = dia === 1 ? 7 : (8 - dia);
+      const proxima = new Date(dataRef);
+      proxima.setDate(proxima.getDate() + diasParaSegunda);
+      return proxima.toISOString().split('T')[0];
+    }
+
+    document.addEventListener('DOMContentLoaded', () => {
+      const hoje = new Date();
+      const nomesMeses = ['Janeiro','Fevereiro','Março','Abril','Maio','Junho','Julho','Agosto','Setembro','Outubro','Novembro','Dezembro'];
+      const selectMes = document.getElementById('mes');
+      for (let i = 0; i < 12; i++) {
+        const option = document.createElement('option');
+        option.value = `${nomesMeses[i]} de ${hoje.getFullYear()}`;
+        option.textContent = `${nomesMeses[i]} de ${hoje.getFullYear()}`;
+        if (i === hoje.getMonth()) option.selected = true;
+        selectMes.appendChild(option);
+      }
+      document.querySelector('input[name="data"]').value = hoje.toISOString().split('T')[0];
+      document.querySelector('input[name="dataPagamento"]').value = proximaSegunda(hoje);
+    });
+
+    fetch(`${URL}?acao=servidores`).then(res => res.json()).then(data => {
+      servidores = data;
+      const lista = document.getElementById('listaProfissionais');
+      lista.innerHTML = '';
+      data.forEach(p => {
+        const opt = document.createElement('option');
+        opt.value = p.nome;
+        lista.appendChild(opt);
+      });
+    });
+
+    document.getElementById('profissional').addEventListener('input', () => {
+      const nomeDigitado = profissional.value.trim().toUpperCase();
+      const p = servidores.find(p => p.nome.trim().toUpperCase() === nomeDigitado);
+      if (p) {
+        funcao.value = p.funcao || '';
+        dadosPix.value = p.pix || '';
+        titularConta.value = p.titular || '';
+        valorAcordado.value = p.valor || '';
+        cpfCnpj.value = p.cpf || '';
+        funcao.readOnly = false; // sempre editável
+        dadosPix.readOnly = true;
+        titularConta.readOnly = true;
+        valorAcordado.readOnly = false;
+        cpfCnpj.readOnly = true;
+      } else {
+        funcao.value = '';
+        dadosPix.value = '';
+        titularConta.value = '';
+        valorAcordado.value = '';
+        cpfCnpj.value = '';
+        funcao.readOnly = false;
+        dadosPix.readOnly = false;
+        titularConta.readOnly = false;
+        valorAcordado.readOnly = false;
+        cpfCnpj.readOnly = false;
+      }
+    });
+
+    [valorAcordado, desconto].forEach(input => {
+      input.addEventListener('input', () => {
+        const v = parseFloat(valorAcordado.value) || 0;
+        const d = parseFloat(desconto.value) || 0;
+        valorFinal.value = (v - d).toFixed(2);
+      });
+    });
+
+    form.addEventListener('submit', e => {
+      e.preventDefault();
+      const btn = form.querySelector('button[type="submit"]');
+      const loading = document.getElementById('loading-screen');
+      const msg = document.getElementById('loading-message');
+      btn.disabled = true;
+      btn.textContent = 'Salvando...';
+      msg.textContent = 'Salvando dados...';
+      loading.style.display = 'flex';
+      const dados = Object.fromEntries(new FormData(form));
+      dados.acao = 'adicionar';
+      fetch(URL, { method: 'POST', body: JSON.stringify(dados) }).then(() => {
+        form.reset();
+        filtroStatus.value = 'PENDENTE';
+        setTimeout(() => {
+          btn.disabled = false;
+          btn.textContent = 'Salvar';
+          loading.style.display = 'none';
+          carregarRegistros();
+        }, 1500);
+      });
+    });
 
     function carregarRegistros() {
       fetch(`${URL}?acao=ler`).then(res => res.json()).then(data => {
@@ -150,19 +241,16 @@
         tbody.innerHTML = '';
         const filtroS = filtroStatus.value || 'PENDENTE';
         const filtroE = filtroEmpresa.value || 'TODAS';
-
         data.forEach(item => {
           if (filtroS !== 'TODOS' && item.status !== filtroS) return;
           if (filtroE !== 'TODAS' && item.empresa !== filtroE) return;
-
           const comentario = (item.comentario || '').toString().trim();
           const linkComentario = comentario
             ? `<div><button class="ver-comentario" onclick="abrirComentario(${item.index})">VER COMENTÁRIO</button></div>`
             : '';
-
           const tr = document.createElement('tr');
           tr.setAttribute('data-index', item.index);
-
+          tr.className = item.status === 'PAGO' ? 'pago' : item.status === 'PENDENTE' ? 'pendente' : 'lancado';
           tr.innerHTML = `
             <td>${item.empresa || ''}</td>
             <td>${item.data?.split('T')[0] || ''}</td>
@@ -191,8 +279,59 @@
       });
     }
 
+    function abrirComentario(index){
+      const item = dadosRegistros.find(x => x.index === index);
+      const texto = (item && item.comentario ? String(item.comentario) : '').trim();
+      if(!texto){ alert('Sem comentário para este lançamento.'); return; }
+      document.getElementById('coment-texto').textContent = texto;
+      document.getElementById('coment-modal').style.display = 'flex';
+    }
+    function fecharComentario(){ document.getElementById('coment-modal').style.display = 'none'; }
+
+    function atualizarStatus(select, index) {
+      const status = select.value;
+      const loading = document.getElementById('loading-screen');
+      const msg = document.getElementById('loading-message');
+      msg.textContent = 'Atualizando status...';
+      loading.style.display = 'flex';
+      fetch(URL, { method: 'POST', body: JSON.stringify({ acao: 'atualizarStatus', index, status }) })
+        .then(() => setTimeout(() => location.reload(), 1500));
+    }
+
+    function excluir(index) {
+      const senha = prompt("Digite a senha para excluir:");
+      if (senha === '1234') {
+        fetch(URL, { method: 'POST', body: JSON.stringify({ acao: 'excluir', index }) })
+          .then(() => document.querySelector(`tr[data-index="${index}"]`)?.remove());
+      } else { alert("Senha incorreta."); }
+    }
+
     filtroStatus.addEventListener('change', carregarRegistros);
     filtroEmpresa.addEventListener('change', carregarRegistros);
+    window.addEventListener('load', () => {
+      setTimeout(() => {
+        document.getElementById('loading-screen').style.display = 'none';
+        filtroStatus.value = 'PENDENTE';
+        carregarRegistros();
+      }, 2000);
+    });
+
+    // === CPF/CNPJ máscara e validação ===
+    const cpfCnpjInput = document.getElementById("cpfCnpj");
+    cpfCnpjInput.addEventListener("input", () => {
+      let v = cpfCnpjInput.value.replace(/\D/g, "");
+      if (v.length <= 11) {
+        v = v.replace(/(\d{3})(\d)/, "$1.$2");
+        v = v.replace(/(\d{3})(\d)/, "$1.$2");
+        v = v.replace(/(\d{3})(\d{1,2})$/, "$1-$2");
+      } else {
+        v = v.replace(/^(\d{2})(\d)/, "$1.$2");
+        v = v.replace(/^(\d{2})\.(\d{3})(\d)/, "$1.$2.$3");
+        v = v.replace(/\.(\d{3})(\d)/, ".$1/$2");
+        v = v.replace(/(\d{4})(\d)/, "$1-$2");
+      }
+      cpfCnpjInput.value = v;
+    });
   </script>
 </body>
 </html>
